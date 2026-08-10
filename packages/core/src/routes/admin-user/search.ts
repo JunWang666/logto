@@ -1,7 +1,6 @@
 import { OrganizationUserRelations, UsersRoles } from '@logto/schemas';
 import { type Nullable, tryThat, yes } from '@silverhand/essentials';
 
-import { EnvSet } from '#src/env-set/index.js';
 import RequestError from '#src/errors/RequestError/index.js';
 import koaGuard from '#src/middleware/koa-guard.js';
 import koaPagination from '#src/middleware/koa-pagination.js';
@@ -42,11 +41,6 @@ const getQueryRelation = (
 const getIdentityLookupParams = (
   searchParams: URLSearchParams
 ): { identityTarget: string; identityUserId: string } | undefined => {
-  // Find users by social identity (identityTarget + identityUserId)
-  if (!EnvSet.values.isDevFeaturesEnabled) {
-    return;
-  }
-
   const identityTarget = searchParams.get('identityTarget');
   const identityUserId = searchParams.get('identityUserId');
 
