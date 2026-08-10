@@ -39,6 +39,47 @@ const getQueryRelation = (
   return undefined;
 };
 
+const getIdentityLookupParams = (
+  searchParams: URLSearchParams
+): { identityTarget: string; identityUserId: string } | undefined => {
+  // Find users by social identity (identityTarget + identityUserId)
+  if (!EnvSet.values.isDevFeaturesEnabled) {
+    return;
+  }
+
+  const identityTarget = searchParams.get('identityTarget');
+  const identityUserId = searchParams.get('identityUserId');
+
+  if (Boolean(identityTarget) !== Boolean(identityUserId)) {
+    throw new RequestError({
+      code: 'request.invalid_input',
+      status: 400,
+      details: '`identityTarget` and `identityUserId` must be provided together.',
+    });
+  }
+
+  if (!(identityTarget && identityUserId)) {
+    return;
+  }
+
+  const excludeRoleId = searchParams.get('excludeRoleId');
+  const excludeOrganizationId = searchParams.get('excludeOrganizationId');
+  const hasOtherFilters =
+    Boolean(excludeRoleId) ||
+    Boolean(excludeOrganizationId) ||
+    [...searchParams.keys()].some((key) => key.startsWith('search.'));
+
+  if (hasOtherFilters) {
+    throw new RequestError({
+      code: 'request.invalid_input',
+      status: 400,
+      details: 'Identity lookup cannot be combined with other user search filters.',
+    });
+  }
+
+  return { identityTarget, identityUserId };
+};
+
 export default function adminUserSearchRoutes<T extends ManagementApiRouter>(
   ...[router, { queries }]: RouterInitArgs<T>
 ) {
@@ -59,43 +100,14 @@ export default function adminUserSearchRoutes<T extends ManagementApiRouter>(
 
       return tryThat(
         async () => {
-          const excludeRoleId = searchParams.get('excludeRoleId');
-          const excludeOrganizationId = searchParams.get('excludeOrganizationId');
-          // Find users by social identity (identityTarget + identityUserId)
-          const identityTarget = EnvSet.values.isDevFeaturesEnabled
-            ? searchParams.get('identityTarget')
-            : null;
-          const identityUserId = EnvSet.values.isDevFeaturesEnabled
-            ? searchParams.get('identityUserId')
-            : null;
-
-          if (Boolean(identityTarget) !== Boolean(identityUserId)) {
-            throw new RequestError({
-              code: 'request.invalid_input',
-              status: 400,
-              details: '`identityTarget` and `identityUserId` must be provided together.',
-            });
-          }
-
-          const hasIdentityLookup = Boolean(identityTarget && identityUserId);
-
-          if (
-            hasIdentityLookup &&
-            (excludeRoleId ||
-              excludeOrganizationId ||
-              [...searchParams.keys()].some((key) => key.startsWith('search.')))
-          ) {
-            throw new RequestError({
-              code: 'request.invalid_input',
-              status: 400,
-              details: 'Identity lookup cannot be combined with other user search filters.',
-            });
-          }
-
+          const identityLookup = getIdentityLookupParams(searchParams);
           const includePasswordHash = yes(searchParams.get('includePasswordHash') ?? '');
 
-          if (identityTarget && identityUserId) {
-            const user = await findUserByIdentity(identityTarget, identityUserId);
+          if (identityLookup) {
+            const user = await findUserByIdentity(
+              identityLookup.identityTarget,
+              identityLookup.identityUserId
+            );
 
             ctx.pagination.totalCount = user ? 1 : 0;
             ctx.body = user
@@ -104,6 +116,9 @@ export default function adminUserSearchRoutes<T extends ManagementApiRouter>(
 
             return next();
           }
+
+          const excludeRoleId = searchParams.get('excludeRoleId');
+          const excludeOrganizationId = searchParams.get('excludeOrganizationId');
 
           if (excludeRoleId && excludeOrganizationId) {
             throw new RequestError({
