@@ -1,6 +1,7 @@
 import { OrganizationUserRelations, UsersRoles } from '@logto/schemas';
 import { type Nullable, tryThat, yes } from '@silverhand/essentials';
 
+import { EnvSet } from '#src/env-set/index.js';
 import RequestError from '#src/errors/RequestError/index.js';
 import koaGuard from '#src/middleware/koa-guard.js';
 import koaPagination from '#src/middleware/koa-pagination.js';
@@ -42,7 +43,7 @@ export default function adminUserSearchRoutes<T extends ManagementApiRouter>(
   ...[router, { queries }]: RouterInitArgs<T>
 ) {
   const {
-    users: { findUsers, countUsers },
+    users: { findUsers, countUsers, findUserByIdentity },
   } = queries;
 
   router.get(
@@ -60,6 +61,49 @@ export default function adminUserSearchRoutes<T extends ManagementApiRouter>(
         async () => {
           const excludeRoleId = searchParams.get('excludeRoleId');
           const excludeOrganizationId = searchParams.get('excludeOrganizationId');
+          // Find users by social identity (identityTarget + identityUserId)
+          const identityTarget = EnvSet.values.isDevFeaturesEnabled
+            ? searchParams.get('identityTarget')
+            : null;
+          const identityUserId = EnvSet.values.isDevFeaturesEnabled
+            ? searchParams.get('identityUserId')
+            : null;
+
+          if (Boolean(identityTarget) !== Boolean(identityUserId)) {
+            throw new RequestError({
+              code: 'request.invalid_input',
+              status: 400,
+              details: '`identityTarget` and `identityUserId` must be provided together.',
+            });
+          }
+
+          const hasIdentityLookup = Boolean(identityTarget && identityUserId);
+
+          if (
+            hasIdentityLookup &&
+            (excludeRoleId ||
+              excludeOrganizationId ||
+              [...searchParams.keys()].some((key) => key.startsWith('search.')))
+          ) {
+            throw new RequestError({
+              code: 'request.invalid_input',
+              status: 400,
+              details: 'Identity lookup cannot be combined with other user search filters.',
+            });
+          }
+
+          const includePasswordHash = yes(searchParams.get('includePasswordHash') ?? '');
+
+          if (identityTarget && identityUserId) {
+            const user = await findUserByIdentity(identityTarget, identityUserId);
+
+            ctx.pagination.totalCount = user ? 1 : 0;
+            ctx.body = user
+              ? [transpileAdminUserProfileResponse(user, { includePasswordHash })]
+              : [];
+
+            return next();
+          }
 
           if (excludeRoleId && excludeOrganizationId) {
             throw new RequestError({
@@ -79,8 +123,6 @@ export default function adminUserSearchRoutes<T extends ManagementApiRouter>(
             countUsers(conditions),
             findUsers(limit, offset, conditions),
           ]);
-
-          const includePasswordHash = yes(searchParams.get('includePasswordHash') ?? '');
 
           ctx.pagination.totalCount = count;
           ctx.body = users.map((user) =>

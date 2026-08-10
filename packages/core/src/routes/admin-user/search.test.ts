@@ -4,6 +4,7 @@ import { pickDefault } from '@logto/shared/esm';
 import { removeUndefinedKeys } from '@silverhand/essentials';
 
 import { mockUser, mockUserList, mockUserListResponse } from '#src/__mocks__/index.js';
+import { EnvSet } from '#src/env-set/index.js';
 import { type InsertUserResult } from '#src/libraries/user.js';
 import type Libraries from '#src/tenants/Libraries.js';
 import type Queries from '#src/tenants/Queries.js';
@@ -21,6 +22,22 @@ const filterUsersWithSearch = (users: User[], search: string) =>
     )
   );
 
+const mockIdentityUser: User = {
+  ...mockUser,
+  id: 'user_1',
+  name: 'Alice',
+  identities: {
+    dingtalk: {
+      userId: 'ding_123',
+      details: {},
+    },
+  },
+};
+
+const findUserByIdentity = jest.fn(async (target: string, userId: string) =>
+  target === 'dingtalk' && userId === 'ding_123' ? mockIdentityUser : null
+);
+
 const mockedQueries = {
   users: {
     countUsers: jest.fn(async ({ search }) => ({
@@ -32,6 +49,7 @@ const mockedQueries = {
       async (limit, offset, { search }): Promise<User[]> =>
         search ? filterUsersWithSearch(mockUserList, String(search)) : mockUserList
     ),
+    findUserByIdentity,
   },
   roles: {
     findRolesByRoleNames: jest.fn(
@@ -71,9 +89,13 @@ describe('adminUserRoutes', () => {
     users: usersLibraries,
   });
   const userRequest = createRequester({ authedRoutes: adminUserRoutes, tenantContext });
+  const originalIsDevFeaturesEnabled = EnvSet.values.isDevFeaturesEnabled;
 
   afterEach(() => {
     jest.clearAllMocks();
+    // eslint-disable-next-line @silverhand/fp/no-mutation -- Restore EnvSet after each test.
+    (EnvSet.values as { isDevFeaturesEnabled: boolean }).isDevFeaturesEnabled =
+      originalIsDevFeaturesEnabled;
   });
 
   it('GET /users', async () => {
@@ -116,5 +138,88 @@ describe('adminUserRoutes', () => {
       'total-number',
       `${filterUsersWithSearch(mockUserList, search).length}`
     );
+  });
+
+  describe('GET /users by social identity', () => {
+    beforeEach(() => {
+      // eslint-disable-next-line @silverhand/fp/no-mutation -- Enable identity lookup for this suite.
+      (EnvSet.values as { isDevFeaturesEnabled: boolean }).isDevFeaturesEnabled = true;
+    });
+
+    it('should return the matched user', async () => {
+      const response = await userRequest.get(
+        '/users?identityTarget=dingtalk&identityUserId=ding_123'
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveLength(1);
+      expect(response.body[0].id).toBe('user_1');
+      expect(response.body[0].identities).toEqual({
+        dingtalk: {
+          userId: 'ding_123',
+          details: {},
+        },
+      });
+      expect(response.header).toHaveProperty('total-number', '1');
+      expect(findUserByIdentity).toHaveBeenCalledWith('dingtalk', 'ding_123');
+      expect(mockedQueries.users.findUsers).not.toHaveBeenCalled();
+    });
+
+    it('should return an empty array when no user is linked', async () => {
+      const response = await userRequest.get(
+        '/users?identityTarget=dingtalk&identityUserId=unknown'
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual([]);
+      expect(response.header).toHaveProperty('total-number', '0');
+      expect(findUserByIdentity).toHaveBeenCalledWith('dingtalk', 'unknown');
+    });
+
+    it('should return 400 when only identityTarget is provided', async () => {
+      const response = await userRequest.get('/users?identityTarget=dingtalk');
+
+      expect(response.status).toBe(400);
+      expect(findUserByIdentity).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 when only identityUserId is provided', async () => {
+      const response = await userRequest.get('/users?identityUserId=ding_123');
+
+      expect(response.status).toBe(400);
+      expect(findUserByIdentity).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 when identity lookup is combined with excludeRoleId', async () => {
+      const response = await userRequest.get(
+        '/users?identityTarget=dingtalk&identityUserId=ding_123&excludeRoleId=role_1'
+      );
+
+      expect(response.status).toBe(400);
+      expect(findUserByIdentity).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 when identity lookup is combined with search filters', async () => {
+      const response = await userRequest.get(
+        '/users?identityTarget=dingtalk&identityUserId=ding_123&search.username=alice'
+      );
+
+      expect(response.status).toBe(400);
+      expect(findUserByIdentity).not.toHaveBeenCalled();
+    });
+
+    it('should ignore identity params when dev features are disabled', async () => {
+      // eslint-disable-next-line @silverhand/fp/no-mutation -- Cover the disabled-feature path.
+      (EnvSet.values as { isDevFeaturesEnabled: boolean }).isDevFeaturesEnabled = false;
+
+      const response = await userRequest.get(
+        '/users?identityTarget=dingtalk&identityUserId=ding_123'
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(mockUserListResponse);
+      expect(findUserByIdentity).not.toHaveBeenCalled();
+      expect(mockedQueries.users.findUsers).toHaveBeenCalled();
+    });
   });
 });

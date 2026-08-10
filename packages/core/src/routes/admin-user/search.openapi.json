@@ -2,13 +2,36 @@
   "paths": {
     "/api/users": {
       "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "identityTarget",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The social identity target, e.g. \"dingtalk\". Must be used together with `identityUserId`. Cannot be combined with other user search filters such as `search.*`, `excludeRoleId`, or `excludeOrganizationId`."
+          },
+          {
+            "in": "query",
+            "name": "identityUserId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The external user identifier stored in the social identity. Must be used together with `identityTarget`. Cannot be combined with other user search filters such as `search.*`, `excludeRoleId`, or `excludeOrganizationId`."
+          }
+        ],
         "responses": {
           "200": {
-            "description": "An array of users that match the given criteria."
+            "description": "An array of users that match the given criteria. When looking up by social identity (`identityTarget` + `identityUserId`), the array contains at most one user, or is empty when no linked user is found."
+          },
+          "400": {
+            "description": "The request is invalid. For example, only one of `identityTarget` / `identityUserId` is provided, or identity lookup is combined with other user search filters."
           }
         },
         "summary": "Get users",
-        "description": "Get users with filters and pagination.\n\nLogto provides a very flexible way to query users. You can filter users by almost any fields with multiple modes. To learn more about the query syntax, please refer to [Advanced user search](https://docs.logto.io/docs/recipes/manage-users/advanced-user-search/)."
+        "description": "Get users with filters and pagination.\n\nLogto provides a very flexible way to query users. You can filter users by almost any fields with multiple modes. To learn more about the query syntax, please refer to [Advanced user search](https://docs.logto.io/docs/recipes/manage-users/advanced-user-search/).\n\nYou can also look up a user by a linked social identity using `identityTarget` and `identityUserId` together. When both are provided, other search filters cannot be used in the same request."
       }
     }
   }
