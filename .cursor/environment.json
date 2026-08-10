@@ -1,0 +1,21 @@
+{
+  "name": "Logto",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "logto-dev",
+      "command": "export DB_URL=\"postgres://postgres:p0stgr3s@localhost:5432/logto\" && pnpm start:dev",
+      "description": "Runs Logto Core (3001 user / 3002 admin), Console (5002), Experience (5001), and demo apps (5003-5005) in dev/watch mode."
+    }
+  ],
+  "ports": [
+    { "name": "Core (user endpoint)", "port": 3001 },
+    { "name": "Core (admin endpoint)", "port": 3002 },
+    { "name": "Experience (Vite)", "port": 5001 },
+    { "name": "Console (Vite)", "port": 5002 },
+    { "name": "Demo app (Vite)", "port": 5003 },
+    { "name": "Account (Vite)", "port": 5004 },
+    { "name": "Device demo app (Vite)", "port": 5005 }
+  ]
+}
