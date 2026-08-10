@@ -5,7 +5,7 @@
   "terminals": [
     {
       "name": "logto-dev",
-      "command": "export DB_URL=\"postgres://postgres:p0stgr3s@localhost:5432/logto\" && pnpm start:dev",
+      "command": "bash .cursor/start.sh && export DB_URL=\"postgres://postgres:p0stgr3s@localhost:5432/logto\" && pnpm start:dev",
       "description": "Runs Logto Core (3001 user / 3002 admin), Console (5002), Experience (5001), and demo apps (5003-5005) in dev/watch mode."
     }
   ],
