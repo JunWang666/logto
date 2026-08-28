@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+
 import { type OpenAPIV3 } from 'openapi-types';
 
 import { EnvSet } from '#src/env-set/index.js';
@@ -19,6 +21,12 @@ const createDevFeatureBooleanSchema = () =>
     [devFeatureSchemaExtension]: true,
   }) satisfies OpenAPIV3.SchemaObject & Record<typeof devFeatureSchemaExtension, true>;
 
+const createDevFeatureStringSchema = () =>
+  ({
+    type: 'string',
+    [devFeatureSchemaExtension]: true,
+  }) satisfies OpenAPIV3.SchemaObject & Record<typeof devFeatureSchemaExtension, true>;
+
 const createDocument = (): DeepPartial<OpenAPIV3.Document> => ({
   openapi: '3.0.1',
   info: {
@@ -28,6 +36,18 @@ const createDocument = (): DeepPartial<OpenAPIV3.Document> => ({
   paths: {
     '/api/mock': {
       patch: {
+        parameters: [
+          {
+            name: 'stable',
+            in: 'query',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'betaParameter',
+            in: 'query',
+            schema: createDevFeatureStringSchema(),
+          },
+        ],
         requestBody: {
           content: {
             'application/json': {
@@ -75,7 +95,7 @@ describe('swagger general utils', () => {
     setDevFeaturesEnabled(originalIsDevFeaturesEnabled);
   });
 
-  it('should remove dev feature schema properties when dev features are disabled', () => {
+  it('should remove dev feature schema properties and parameters when dev features are disabled', () => {
     setDevFeaturesEnabled(false);
 
     const document = removeUnnecessaryOperations(createDocument());
@@ -84,6 +104,13 @@ describe('swagger general utils', () => {
       paths: {
         '/api/mock': {
           patch: {
+            parameters: [
+              {
+                name: 'stable',
+                in: 'query',
+                schema: { type: 'string' },
+              },
+            ],
             requestBody: {
               content: {
                 'application/json': {
@@ -103,10 +130,11 @@ describe('swagger general utils', () => {
       },
     });
     expect(JSON.stringify(document)).not.toContain('beta');
+    expect(JSON.stringify(document)).not.toContain('betaParameter');
     expect(JSON.stringify(document)).not.toContain(devFeatureSchemaExtension);
   });
 
-  it('should keep dev feature schema properties without exposing the internal marker when dev features are enabled', () => {
+  it('should keep dev feature schema properties and parameters without exposing the internal marker when dev features are enabled', () => {
     setDevFeaturesEnabled(true);
 
     const document = removeUnnecessaryOperations(createDocument());
@@ -115,6 +143,18 @@ describe('swagger general utils', () => {
       paths: {
         '/api/mock': {
           patch: {
+            parameters: [
+              {
+                name: 'stable',
+                in: 'query',
+                schema: { type: 'string' },
+              },
+              {
+                name: 'betaParameter',
+                in: 'query',
+                schema: { type: 'string' },
+              },
+            ],
             requestBody: {
               content: {
                 'application/json': {
@@ -150,5 +190,27 @@ describe('swagger general utils', () => {
       },
     });
     expect(document.paths).not.toHaveProperty('/api/dev');
+  });
+
+  it('should expose external identity lookup parameters only when dev features are enabled', async () => {
+    const loadDocument = async () =>
+      JSON.parse(
+        await fs.readFile(new URL('../../admin-user/search.openapi.json', import.meta.url), 'utf8')
+      ) as DeepPartial<OpenAPIV3.Document>;
+
+    setDevFeaturesEnabled(false);
+    const stableDocument = removeUnnecessaryOperations(await loadDocument());
+    expect(stableDocument.paths?.['/api/users']?.get?.parameters).toEqual([]);
+
+    setDevFeaturesEnabled(true);
+    const devDocument = removeUnnecessaryOperations(await loadDocument());
+    expect(devDocument.paths?.['/api/users']?.get?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'identityType' }),
+        expect.objectContaining({ name: 'identityProvider' }),
+        expect.objectContaining({ name: 'identityId' }),
+      ])
+    );
+    expect(JSON.stringify(devDocument)).not.toContain(devFeatureSchemaExtension);
   });
 });

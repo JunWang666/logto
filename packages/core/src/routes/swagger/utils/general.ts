@@ -18,7 +18,10 @@ const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slic
 const cloudOnlyTag = 'Cloud only';
 /** The tag name is used in the supplement document to indicate that the corresponding API operation is a dev feature. */
 export const devFeatureTag = 'Dev feature';
-/** The OpenAPI schema extension that hides a schema property when dev features are disabled. */
+/**
+ * The OpenAPI schema extension that hides a schema property or query parameter when dev features
+ * are disabled.
+ */
 export const devFeatureSchemaExtension = 'x-logto-dev-feature';
 
 const reservedTags = new Set([cloudOnlyTag, devFeatureTag]);
@@ -262,9 +265,9 @@ export const validateSwaggerDocument = (document: OpenAPIV3.Document) => {
  *
  * Remove operations (path + method) that are tagged with `Cloud only` if the application is not
  * running in the cloud and remove operations with `Dev feature` tag if Logto's
- * `isDevFeaturesEnabled` flag is set to be false. It also prunes schema properties marked with
- * `x-logto-dev-feature` when dev features are disabled, and removes the internal marker when they
- * are enabled.
+ * `isDevFeaturesEnabled` flag is set to be false. It also prunes schema properties and query
+ * parameters marked with `x-logto-dev-feature` when dev features are disabled, and removes the
+ * internal marker when they are enabled.
  *
  * This will prevent the swagger validation from failing in the OSS environment.
  *
@@ -275,6 +278,7 @@ export const removeUnnecessaryOperations = (
 ): DeepPartial<OpenAPIV3.Document> => {
   const { isCloud, isDevFeaturesEnabled } = EnvSet.values;
 
+  removeDevFeatureParameters(document);
   removeDevFeatureSchemaProperties(document);
 
   if ((isCloud && isDevFeaturesEnabled) || !document.paths) {
@@ -308,6 +312,35 @@ export const removeUnnecessaryOperations = (
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => isObject(value);
+
+const removeDevFeatureParameters = (value: unknown) => {
+  if (!isRecord(value)) {
+    return;
+  }
+
+  const { parameters } = value;
+
+  if (Array.isArray(parameters)) {
+    // eslint-disable-next-line @silverhand/fp/no-mutation -- Pruning the supplement document is intentionally in-place.
+    value.parameters = parameters.filter((parameter) => {
+      if (!isRecord(parameter) || !isRecord(parameter.schema)) {
+        return true;
+      }
+
+      const isDevFeature = parameter.schema[devFeatureSchemaExtension] === true;
+
+      if (isDevFeature && EnvSet.values.isDevFeaturesEnabled) {
+        Reflect.deleteProperty(parameter.schema, devFeatureSchemaExtension);
+      }
+
+      return EnvSet.values.isDevFeaturesEnabled || !isDevFeature;
+    });
+  }
+
+  for (const item of Object.values(value).flat()) {
+    removeDevFeatureParameters(item);
+  }
+};
 
 const removeRequiredProperty = (
   schema: Record<string, unknown>,
